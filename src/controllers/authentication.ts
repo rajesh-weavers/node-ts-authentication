@@ -1,8 +1,13 @@
 import express from "express";
-import { createUser, getUserByEmail } from "../models/User";
+import { createUser, getUserByEmail, updateUserById } from "../models/User";
 import { authentication, generateOTP, random } from "../helpers";
 import transporter from "../config/email";
-import { createUserOtp } from "../models/UserOtp";
+import {
+  createUserOtp,
+  deleteOtpById,
+  getUserOtpByEmail,
+} from "../models/UserOtp";
+import jwt from "jsonwebtoken";
 
 export const login = async (req: express.Request, res: express.Response) => {
   try {
@@ -37,25 +42,28 @@ export const login = async (req: express.Request, res: express.Response) => {
       });
     }
 
-    const salt = random();
-    user.authentication.sessionToken = authentication(
-      salt,
-      user._id.toString()
+    const accessToken = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+      },
+      process.env.JWT_SECRET || "nodeAuthentication", // fallback
+      {
+        expiresIn: "24h",
+      }
     );
-
-    await user.save();
-
-    res.cookie("node_auth_token", user.authentication.sessionToken, {
-      domain: process.env.COOKIE_DOMAIN,
-      path: "/",
-    });
 
     return res
       .status(200)
       .json({
         success: true,
-        message: "User logged in successfully.",
-        user,
+        message: "You logged in successfully.",
+        accessToken,
+        user: {
+          id: user._id,
+          email: user.email,
+          name: user.name,
+        },
       })
       .end();
   } catch (error) {
@@ -98,9 +106,12 @@ export const register = async (req: express.Request, res: express.Response) => {
       },
     });
 
-    const userOtp = await createUserOtp({
+    await createUserOtp({
       email,
       otp: OTP,
+      expiresAt: new Date(
+        Date.now() + Number(process.env.OTP_EXPIRY_MINUTES) * 60 * 1000
+      ),
     });
 
     const info = await transporter.sendMail({
@@ -130,18 +141,111 @@ export const register = async (req: express.Request, res: express.Response) => {
 
 export const logout = async (req: express.Request, res: express.Response) => {
   try {
-    // Clear the authentication cookie
-    res.cookie("node_auth_token", "", {
-      domain: process.env.COOKIE_DOMAIN,
-      path: "/",
-      expires: new Date(0), // Expire the cookie immediately
-      httpOnly: true, // Prevent client-side access
-      secure: process.env.NODE_ENV === "production", // Secure in production
+    return res.status(200).json({
+      success: true,
+      message: "User logged out successfully.",
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Something went wrong.",
+    });
+  }
+};
+
+export const sendOtp = async (req: express.Request, res: express.Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email.",
+      });
+    }
+
+    const isMatch = await getUserByEmail(email);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: "User does not exist.",
+      });
+    }
+
+    const OTP = generateOTP(6);
+
+    await createUserOtp({
+      email,
+      otp: OTP,
+      expiresAt: new Date(
+        Date.now() + Number(process.env.OTP_EXPIRY_MINUTES) * 60 * 1000
+      ),
+    });
+
+    await transporter.sendMail({
+      from: `"${process.env.EMAIL_NAME}" <${process.env.EMAIL_USER_EMAIL}>`, // sender address
+      to: email, // list of receivers
+      subject: "Email verification", // Subject line
+      text: "Please verify your email", // plain text body
+      html: `<p>Do not share this email with anyone.</p>
+            <p>Email verification code: <b>${OTP}</b></p>`, // html body
     });
 
     return res.status(200).json({
       success: true,
-      message: "User logged out successfully.",
+      message: "OTP sent successfully.",
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Something went wrong.",
+    });
+  }
+};
+
+export const verifyOtp = async (
+  req: express.Request,
+  res: express.Response
+) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email and otp.",
+      });
+    }
+
+    const isMatch = await getUserByEmail(email);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: "User does not exist.",
+      });
+    }
+
+    const userOtp = await getUserOtpByEmail(email);
+    if (!userOtp) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP has been expired.",
+      });
+    }
+
+    if (userOtp.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP.",
+      });
+    }
+
+    await deleteOtpById(userOtp._id.toString());
+    await updateUserById(isMatch._id.toString(), {
+      is_verified: true,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Email verified successfully.",
     });
   } catch (error) {
     return res.status(400).json({

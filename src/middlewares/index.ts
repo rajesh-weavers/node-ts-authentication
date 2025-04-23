@@ -1,6 +1,7 @@
 import express from "express";
 import { get, merge } from "lodash";
-import { getUserBySessionToken } from "../models/User";
+import { getUserByEmail } from "../models/User";
+import jwt from "jsonwebtoken";
 
 export const isOwner = async (
   req: express.Request,
@@ -41,14 +42,27 @@ export const isAuthenticated = async (
   next: express.NextFunction
 ) => {
   try {
-    const sessionToken = req.cookies["node_auth_token"];
-    if (!sessionToken) {
-      return res.status(400).json({
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
         success: false,
-        message: "You are not logged in.",
+        message: "Authorization token missing.",
       });
     }
-    const user = await getUserBySessionToken(sessionToken);
+
+    const token = authHeader.split(" ")[1];
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || "nodeAuthentication"
+    ) as {
+      id: string;
+      email: string;
+    };
+
+    const user = await getUserByEmail(decoded.email);
+
     if (!user) {
       return res.status(400).json({
         success: false,

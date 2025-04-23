@@ -1,5 +1,11 @@
 import express from "express";
-import { login, logout, register } from "../controllers/authentication";
+import {
+  login,
+  logout,
+  register,
+  sendOtp,
+  verifyOtp,
+} from "../controllers/authentication";
 import { isAuthenticated } from "../middlewares";
 
 export default (router: express.Router) => {
@@ -7,6 +13,17 @@ export default (router: express.Router) => {
     "/auth/register",
     register as (req: express.Request, res: express.Response) => void
   );
+
+  router.post(
+    "/auth/send-otp",
+    sendOtp as (req: express.Request, res: express.Response) => void
+  );
+
+  router.post(
+    "/auth/verify-otp",
+    verifyOtp as (req: express.Request, res: express.Response) => void
+  );
+
   router.post(
     "/auth/login",
     login as (req: express.Request, res: express.Response) => void

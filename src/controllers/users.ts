@@ -1,5 +1,18 @@
 import express from "express";
 import { deleteUserById, getUserById, getUsers } from "../models/User";
+import { ObjectId } from "mongoose";
+
+interface User {
+  id: ObjectId;
+  name: string;
+  email: string;
+  is_verified: boolean;
+  role: string;
+  createdAt: Date;
+}
+interface CustomRequest extends express.Request {
+  identity: User;
+}
 
 export const getAllUsers = async (
   req: express.Request,
@@ -66,6 +79,23 @@ export const updateUser = async (
       success: true,
       message: "User updated successfully.",
       data: user,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Something went wrong.",
+    });
+  }
+};
+
+export const profile = async (req: express.Request, res: express.Response) => {
+  try {
+    const customReq = req as CustomRequest;
+
+    return res.status(200).json({
+      success: true,
+      message: "User profile data.",
+      data: customReq.identity,
     });
   } catch (error) {
     return res.status(400).json({
